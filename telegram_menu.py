@@ -1,48 +1,23 @@
-"""Register a real Telegram command menu, visible next to the message field.
+"""Register unobtrusive Telegram slash commands and the built-in Menu button.
 
-The menu is managed by Telegram, so it remains visible when GitHub Actions
-is not currently running. Choosing a command inserts it into the input field;
-commands that need an argument (/budget, /rooms, /owner) still require one.
+Unlike a ReplyKeyboardMarkup, this does not take space below the text field.
 """
 from __future__ import annotations
 
-# Telegram commands must be lowercase and may not contain '/' or whitespace.
-# Use actionable short descriptions: Telegram shows these after typing '/'.
 COMMANDS: tuple[tuple[str, str], ...] = (
-    ('menu', '⚙️ Мои фильтры'),
-    ('walk', '🚶 Минут до работы: /walk 18'),
-    ('budget', '💵 Цена: /budget 600 или 0'),
-    ('rooms', '🚪 Комнаты: /rooms 0, 1, 2, 3, 4'),
-    ('owner', '👤 Собственник: /owner on или off'),
-    ('watch', '🔔 Включить уведомления'),
-    ('stop', '🔕 Остановить уведомления'),
-    ('search', '🔎 Найти квартиры'),
-    ('status', '🩺 Проверить источники'),
-    ('help', 'Как пользоваться'),
-    ('start', 'Открыть меню'),
+    ('menu', 'Показать настройки'),
+    ('walk', 'Время пешком: /walk 18'),
+    ('budget', 'Бюджет: /budget 600 или 0'),
+    ('rooms', 'Комнаты: /rooms 0, 1, 2, 3, 4'),
+    ('owner', 'Собственник: /owner on или off'),
+    ('watch', 'Включить мониторинг'),
+    ('stop', 'Остановить мониторинг'),
+    ('search', 'Проверить объявления'),
+    ('status', 'Состояние источников'),
+    ('hide', 'Скрыть большие кнопки'),
+    ('help', 'Подсказка по командам'),
+    ('start', 'Открыть настройки'),
 )
-
-
-def quick_reply_keyboard():
-    """Persistent reply buttons work in GitHub Actions without callback polling.
-
-    Tap => ordinary Telegram message. Actions reads it on the next schedule.
-    """
-    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
-
-    rows = [
-        ['⚙️ Настройки', '🔎 Поиск'],
-        ['🚶 15 мин', '🚶 20 мин', '🚶 25 мин', '🚶 30 мин'],
-        ['💵 500 $', '💵 600 $', '💵 700 $', '💵 Без лимита'],
-        ['👤 Собственник', '🔔 Мониторинг'],
-        ['🩺 Статус'],
-    ]
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=label) for label in row] for row in rows],
-        resize_keyboard=True,
-        is_persistent=True,
-        input_field_placeholder='Фильтры или /walk 18',
-    )
 
 
 async def register_menu(bot) -> None:

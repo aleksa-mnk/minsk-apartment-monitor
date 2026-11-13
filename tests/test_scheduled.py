@@ -17,9 +17,24 @@ def app(monkeypatch):
     a = types.ModuleType('aiogram')
     a.Bot = type('Bot', (), {})
     e = types.ModuleType('aiogram.exceptions')
+    e.TelegramAPIError = type('TelegramAPIError', (Exception,), {})
     e.TelegramBadRequest = type('TelegramBadRequest', (Exception,), {})
     e.TelegramForbiddenError = type('TelegramForbiddenError', (Exception,), {})
     e.TelegramRetryAfter = type('TelegramRetryAfter', (Exception,), {})
+    t = types.ModuleType('aiogram.types')
+    class KeyboardButton:
+        def __init__(self, text):
+            self.text = text
+    class ReplyKeyboardMarkup:
+        def __init__(self, **kwargs):
+            self.keyboard = kwargs['keyboard']
+            self.is_persistent = kwargs.get('is_persistent')
+    t.KeyboardButton = KeyboardButton
+    t.ReplyKeyboardMarkup = ReplyKeyboardMarkup
+    class ReplyKeyboardRemove:
+        pass
+    t.ReplyKeyboardRemove = ReplyKeyboardRemove
+    monkeypatch.setitem(sys.modules, 'aiogram.types', t)
     ui = types.ModuleType('bot')
     ui.menu_text = lambda flt: '<b>Menu</b>'
     ui.status_text = lambda: 'Status'
@@ -53,9 +68,11 @@ class DummyBot:
         self.adverts = []
         self.messages = []
         self.updates = []
+        self.markups = []
 
-    async def send_message(self, chat_id, text, parse_mode=None):
+    async def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
         self.messages.append((chat_id, text))
+        self.markups.append(reply_markup)
 
     async def get_updates(self, offset=0, timeout=0, limit=100):
         return [u for u in self.updates if u.update_id >= offset][:limit]
@@ -78,6 +95,7 @@ def test_settings_and_state_survive_multiple_runs(app, tmp_path):
     assert app.update_filter_from_command(state, '/budget 650') == '/budget'
     assert app.update_filter_from_command(state, '/rooms 1') == '/rooms'
     assert app.update_filter_from_command(state, '/rooms 9') == 'invalid'
+    assert app.update_filter_from_command(state, '/menu') == '/menu'
     assert state['rooms'] == 1
     state['seen'] = ['k3', 'k1', 'k1']
     app.write_state(state, p)
@@ -169,3 +187,96 @@ def test_workflow_schedule_and_secrets_present():
     run = next(step for step in steps if step['name'] == 'Check listings and notify on Telegram')
     assert 'secrets.BOT_TOKEN' in run['env']['BOT_TOKEN']
     assert 'secrets.TELEGRAM_CHAT_ID' in run['env']['TELEGRAM_CHAT_ID']
+
+
+def test_github_walk_settings_are_persistent(app, tmp_path):
+    state = app.read_state(tmp_path / 'missing.json')
+    assert state['walk_minutes'] == 20
+    assert app.update_filter_from_command(state, '🚶 30 мин') == '/walk'
+    assert app.update_filter_from_command(state, '/walk 45') == '/walk'
+    assert app.update_filter_from_command(state, '/walk 46') == 'invalid'
+    assert app.update_filter_from_command(state, '/budget 650') == '/budget'
+    assert app.update_filter_from_command(state, '👤 Собственник') == '/owner'
+    assert app.update_filter_from_command(state, '🔔 Мониторинг') == '/toggle'
+    p = tmp_path / 'state.json'
+    app.write_state(state, p)
+    again = app.read_state(p)
+    assert again['walk_minutes'] == 45
+    assert again['max_price_usd'] == 650
+    assert again['owner_only'] is True
+    assert again['watching'] is False
+
+
+def test_github_old_state_json_is_migrated(app, tmp_path):
+    path = tmp_path / 'state.json'
+    path.write_text(json.dumps({
+        'initialized': True, 'max_price_usd': 625, 'owner_only': True,
+        'watching': True, 'seen': ['k1'], 'update_offset': 50,
+    }), encoding='utf-8')
+    state = app.read_state(path)
+    assert state['walk_minutes'] == 20
+    assert state['ui_version'] == 0
+    assert state['max_price_usd'] == 625
+    assert state['seen'] == ['k1']
+    app.write_state(state, path)
+    assert json.loads(path.read_text())['walk_minutes'] == 20
+
+
+def test_queued_commands_produce_one_short_reply(app, tmp_path):
+    state = app.read_state(tmp_path / 'missing.json')
+    tg = DummyBot()
+    tg.updates = [
+        types.SimpleNamespace(update_id=1, message=types.SimpleNamespace(
+            text='🚶 30 мин', chat=types.SimpleNamespace(id=5, type='private'))),
+        types.SimpleNamespace(update_id=2, message=types.SimpleNamespace(
+            text='💵 600 $', chat=types.SimpleNamespace(id=5, type='private'))),
+        types.SimpleNamespace(update_id=3, message=types.SimpleNamespace(
+            text='👤 Собственник', chat=types.SimpleNamespace(id=5, type='private'))),
+    ]
+    store = Store(':memory:')
+    try:
+        asyncio.run(app.handle_commands(tg, 5, state, store, None))
+        assert len(tg.messages) == 1
+        assert state['walk_minutes'] == 30
+        assert state['max_price_usd'] == 600
+        assert state['owner_only'] is True
+        assert store.get_user(5).walk_minutes == 30
+        assert state['ui_version'] == 3
+    finally:
+        store.close()
+
+
+def test_old_persistent_keyboard_removed_once_even_without_commands(app):
+    state = app.read_state(Path('/unlikely-path-for-state.json'))
+    state['watching'] = False
+    state['ui_version'] = 2  # stored by previous bot version
+    tg = DummyBot()
+    store = Store(':memory:')
+    try:
+        asyncio.run(app.scheduled_cycle(tg, 5, state, store, None))
+        assert len(tg.messages) == 1
+        assert 'скрыты' in tg.messages[0][1]
+        assert isinstance(tg.markups[0], sys.modules['aiogram.types'].ReplyKeyboardRemove)
+        assert state['ui_version'] == 3
+        asyncio.run(app.scheduled_cycle(tg, 5, state, store, None))
+        assert len(tg.messages) == 1  # no repeated setup message
+    finally:
+        store.close()
+
+
+def test_hide_command_also_removes_keyboard_when_already_migrated(app):
+    state = app.read_state(Path('/unlikely-path-for-state.json'))
+    state['ui_version'] = 3
+    tg = DummyBot()
+    tg.updates = [types.SimpleNamespace(
+        update_id=1,
+        message=types.SimpleNamespace(text='/hide', chat=types.SimpleNamespace(id=5, type='private')),
+    )]
+    store = Store(':memory:')
+    try:
+        asyncio.run(app.handle_commands(tg, 5, state, store, None))
+        assert len(tg.messages) == 1
+        assert isinstance(tg.markups[0], sys.modules['aiogram.types'].ReplyKeyboardRemove)
+        assert state['ui_version'] == 3
+    finally:
+        store.close()

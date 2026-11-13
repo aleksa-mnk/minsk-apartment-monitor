@@ -17,7 +17,7 @@ import httpx
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 from dotenv import load_dotenv
 
 from addresses import AddressResolver
@@ -43,11 +43,11 @@ def menu_text(f: Filters) -> str:
     price = f'до {f.max_price_usd} $' if f.max_price_usd else 'любой'
     rooms = 'любые' if f.rooms == 0 else '4+' if f.rooms == 4 else str(f.rooms)
     return (
-        '<b>⚙️ Мои фильтры</b>\n'
-        f'🚶 <b>{f.walk_minutes} мин</b> до Мележа, 5к1\n'
-        f'💵 <b>{price}</b> · 🚪 <b>{rooms}</b>\n'
-        f'👤 <b>{"только собственник" if f.owner_only else "все"}</b>\n'
-        f'🔔 <b>{"включён" if f.watching else "выключен"}</b>'
+        '<b>Настройки</b>\n'
+        f'Пешком: <b>{f.walk_minutes} мин</b> · бюджет: <b>{price}</b>\n'
+        f'Комнаты: {rooms} · собственник: {"только" if f.owner_only else "любой"}\n'
+        f'Мониторинг: {"включён" if f.watching else "выключен"}\n'
+        'Изменить: /walk 18 · /budget 600 · /owner'
     )
 
 
@@ -243,6 +243,13 @@ async def do_search(bot: Bot, chat_id: int, user_id: int, *, seed: bool = False)
 async def start(message: Message) -> None:
     if await _accept_message(message):
         await reply_menu(message, message.from_user.id)
+
+
+@router.message(Command('hide'))
+async def hide_cmd(message: Message) -> None:
+    if await _accept_message(message):
+        await message.answer('Клавиатура скрыта. Настройки: /menu',
+                             reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(Command('search'))

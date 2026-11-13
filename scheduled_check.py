@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 from aiogram import Bot
+from aiogram.types import ReplyKeyboardRemove
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from dotenv import load_dotenv
 
@@ -24,7 +25,7 @@ from panel_config import apply_panel_config
 from sources import ListingSources
 from store import Store
 from walking import PedestrianRouter
-from telegram_menu import register_menu, quick_reply_keyboard
+from telegram_menu import register_menu
 from ui_actions import canonical_command
 
 log = logging.getLogger('minsk-github-monitor')
@@ -139,7 +140,7 @@ def update_filter_from_command(state: dict, text: str) -> str | None:
         if len(parts) != 2 or parts[1] not in ('0', '1', '2', '3', '4'):
             return 'invalid'
         state['rooms'] = int(parts[1])
-    elif command in ('/start', '/help', '/menu', '/status', '/search'):
+    elif command in ('/start', '/help', '/menu', '/status', '/search', '/hide'):
         pass
     else:
         return None
@@ -147,6 +148,8 @@ def update_filter_from_command(state: dict, text: str) -> str | None:
 
 
 def format_action_reply(last_action: str, flt: Filters) -> str:
+    if last_action == '/hide':
+        return 'Клавиатура скрыта. Настройки: /menu'
     if last_action == 'prompt_walk':
         return '🚶 Напиши /walk 18 (от 5 до 45 мин)'
     if last_action == 'prompt_budget':
@@ -200,8 +203,14 @@ async def handle_commands(tg: Bot, chat_id: int, state: dict, store: Store, engi
     if last_action is not None:
         flt = sync_filters_to_store(store, chat_id, state)
         response = telegram_ui.status_text() if last_action == '/status' else format_action_reply(last_action, flt)
-        await tg.send_message(chat_id, response, parse_mode='HTML', reply_markup=quick_reply_keyboard())
-        state['ui_version'] = 2
+        # Remove the old, oversized keyboard once. Later replies remain plain
+        # messages, so Telegram's compact slash-command Menu stays available.
+        remove_keyboard = state['ui_version'] < 3 or last_action == '/hide'
+        await tg.send_message(
+            chat_id, response, parse_mode='HTML',
+            reply_markup=ReplyKeyboardRemove() if remove_keyboard else None,
+        )
+        state['ui_version'] = 3
     return force_search
 
 
@@ -247,11 +256,14 @@ async def scheduled_cycle(tg: Bot, chat_id: int, state: dict, store: Store, engi
     telegram_ui.engine = engine
     sync_filters_to_store(store, chat_id, state)
     force_search = await handle_commands(tg, chat_id, state, store, engine)
-    if state['ui_version'] < 2:
-        # One-time keyboard delivery, including when the user sends no commands.
-        await tg.send_message(chat_id, telegram_ui.menu_text(store.get_user(chat_id)),
-                              parse_mode='HTML', reply_markup=quick_reply_keyboard())
-        state['ui_version'] = 2
+    if state['ui_version'] < 3:
+        # Migration: Telegram keeps old reply keyboards until the bot explicitly
+        # removes them. Do this once even when no commands are waiting.
+        await tg.send_message(
+            chat_id, 'Большие кнопки скрыты. Настройки: /menu',
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        state['ui_version'] = 3
     if not state['watching'] and not force_search:
         log.info('Monitoring is paused; commands were processed')
         return
