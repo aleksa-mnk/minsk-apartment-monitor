@@ -55,10 +55,12 @@ def test_rejects_invalid_panel_config(bad):
 
 
 def test_panel_does_not_reset_seen_history(tmp_path):
-    state = {'seen': ['a', 'b'], 'initialized': True, 'update_offset': 91}
+    state = {'seen': ['a', 'b'], 'initialized': True, 'update_offset': 91,
+             'manual_offset': 12}
     path = tmp_path / 'panel_settings.json'
     path.write_text(json.dumps(sample_config()), encoding='utf8')
     assert apply_panel_config(state, path)
     assert state['seen'] == ['a', 'b']
     assert state['update_offset'] == 91
     assert state['initialized'] is True
+    assert state['manual_offset'] == 0  # changed filters reset manual browsing

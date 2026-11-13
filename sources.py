@@ -410,7 +410,7 @@ def _parse_realt_cards(html: str) -> list[Listing]:
 
 class ListingSources:
     def __init__(self, client: httpx.AsyncClient, *, pages: int = 3):
-        self.client, self.pages = client, min(5, max(1, pages))
+        self.client, self.pages = client, min(8, max(1, pages))
         self.cache: tuple[float, list[SourceResult]] | None = None
         self.lock = asyncio.Lock()
 

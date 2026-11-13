@@ -32,6 +32,8 @@ log = logging.getLogger('minsk-github-monitor')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 STATE_PATH = Path(os.getenv('STATE_PATH', 'data/state.json'))
+AUTOMATIC_BATCH = 8
+MANUAL_BATCH = 12
 DEFAULT_STATE = {
     'version': 1,
     'initialized': False,
@@ -45,6 +47,10 @@ DEFAULT_STATE = {
     'panel_revision': '',
     'last_scan_at': '',
     'last_sent': 0,
+    'last_matches': 0,
+    'last_fetched': 0,
+    # Repeated /search goes through the results in pages, not the same first 3.
+    'manual_offset': 0,
     'seen': [],
 }
 
@@ -61,7 +67,8 @@ def read_state(path: Path = STATE_PATH) -> dict:
                 state[field] = data[field]
     if not isinstance(state['seen'], list) or not all(isinstance(k, str) for k in state['seen']):
         raise ValueError('State.seen must be a list of strings')
-    for field in ('update_offset', 'max_price_usd', 'rooms', 'walk_minutes', 'ui_version', 'last_sent'):
+    for field in ('update_offset', 'max_price_usd', 'rooms', 'walk_minutes', 'ui_version',
+                  'last_sent', 'last_matches', 'last_fetched', 'manual_offset'):
         if not isinstance(state[field], int) or state[field] < 0:
             raise ValueError(f'State.{field} must be a nonnegative integer')
     if (state['rooms'] > 4 or state['max_price_usd'] > 100000
@@ -217,21 +224,25 @@ async def handle_commands(tg: Bot, chat_id: int, state: dict, store: Store, engi
 async def send_adverts(tg: Bot, chat_id: int, state: dict, scan, flt: Filters, *, force_search: bool) -> int:
     seen = set(state['seen'])
     matched = scan.filtered(flt)
-    initial = not state['initialized']
-    if initial:
-        chosen = matched[:5]
-    elif force_search:
-        chosen = matched[:6]
+    if force_search:
+        # Explicit search: page through all current matches, including those
+        # silently marked 'seen' by the older, lossy initial preview logic.
+        offset = state.get('manual_offset', 0)
+        if offset >= len(matched):
+            offset = 0
+        chosen = matched[offset:offset + MANUAL_BATCH]
+        next_offset = offset + len(chosen)
+        state['manual_offset'] = next_offset if next_offset < len(matched) else 0
     else:
-        chosen = [ad for ad in matched if ad.key not in seen][:6]
+        # Every matching ad gets its turn. Do not mark unsent listings as seen.
+        chosen = [ad for ad in matched if ad.key not in seen][:AUTOMATIC_BATCH]
     sent = 0
-    sent_keys = set()
     blocked = False
+    bad_requests = 0
     for ad in chosen:
         try:
             await telegram_ui.send_listing(tg, chat_id, ad)
             seen.add(ad.key)
-            sent_keys.add(ad.key)
             sent += 1
             await asyncio.sleep(1.05)
         except TelegramForbiddenError:
@@ -239,13 +250,16 @@ async def send_adverts(tg: Bot, chat_id: int, state: dict, scan, flt: Filters, *
             blocked = True
             log.error('Bot was blocked by the user; monitoring stopped')
             break
-        except (TelegramBadRequest, TelegramRetryAfter) as exc:
-            log.warning('Telegram rejected %s: %s', ad.key, exc)
+        except TelegramRetryAfter as exc:
+            log.warning('Telegram rate-limited listing %s: %s', ad.key, exc)
             break
-    if initial and not blocked:
-        # Seed currently visible ads, but retry any previews we could not send.
-        still_unsent = {ad.key for ad in chosen if ad.key not in sent_keys}
-        seen.update(ad.key for ad in matched if ad.key not in still_unsent)
+        except TelegramBadRequest as exc:
+            # One broken ad must not prevent the rest from reaching the user.
+            log.warning('Telegram rejected listing %s: %s', ad.key, exc)
+            bad_requests += 1
+            if bad_requests >= 4:
+                break
+    if not blocked:
         state['initialized'] = True
     state['seen'] = sorted(seen)
     return sent
@@ -284,13 +298,25 @@ async def scheduled_cycle(tg: Bot, chat_id: int, state: dict, store: Store, engi
     if scan.candidates and not scan.ads and scan.unrouted == scan.candidates:
         log.warning('All nearby routes failed; keeping uninitialized state for a later retry')
         return
-    delivered = await send_adverts(
-        tg, chat_id, state, scan, store.get_user(chat_id), force_search=force_search
-    )
+    current = store.get_user(chat_id)
+    matched = scan.filtered(current)
+    state['last_matches'] = len(matched)
+    state['last_fetched'] = scan.fetched
+    delivered = await send_adverts(tg, chat_id, state, scan, current, force_search=force_search)
     state['last_sent'] = delivered
     log.info('Delivered %s Telegram messages', delivered)
-    if force_search and delivered == 0:
-        await tg.send_message(chat_id, '\u041d\u043e\u0432\u044b\u0445 \u043a\u0432\u0430\u0440\u0442\u0438\u0440 \u043d\u0435\u0442.')
+    if force_search:
+        # Explain the real number of matches instead of leaving the impression
+        # that the bot intentionally shows only three listings.
+        summary = f'По фильтрам: {len(matched)} квартир из {scan.fetched} проверенных.'
+        if len(matched) > MANUAL_BATCH:
+            if state['manual_offset']:
+                summary += ' Остальные: нажми /search ещё раз.'
+            else:
+                summary += ' Это последняя часть выдачи.'
+        if delivered < len(matched) and not state['manual_offset'] and len(matched) <= MANUAL_BATCH:
+            summary += f' Отправлено: {delivered}.'
+        await tg.send_message(chat_id, summary)
 
 
 async def main() -> None:
@@ -318,7 +344,7 @@ async def main() -> None:
     }
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=True, headers=headers) as client:
-            src = ListingSources(client, pages=max(1, min(5, int(os.getenv('PAGES_PER_SOURCE', '3')))))
+            src = ListingSources(client, pages=max(1, min(8, int(os.getenv('PAGES_PER_SOURCE', '6')))))
             resolver = AddressResolver(client, store)
             pedestrian = PedestrianRouter(client, store)
             engine = Engine(store, src, resolver, pedestrian)

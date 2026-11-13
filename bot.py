@@ -52,16 +52,10 @@ def menu_text(f: Filters) -> str:
 
 
 def main_keyboard(f: Filters) -> InlineKeyboardMarkup:
-    budget_label = f'{f.max_price_usd} $' if f.max_price_usd else 'Любая цена'
-    rooms_label = 'Любые' if f.rooms == 0 else '4+' if f.rooms == 4 else str(f.rooms)
+    # Local polling mode remains usable, but it should never send a wall of
+    # buttons. The cloud version uses slash commands and the web dashboard.
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f'🚶 {f.walk_minutes} мин', callback_data='choose:walk'),
-         InlineKeyboardButton(text=f'💵 {budget_label}', callback_data='choose:budget')],
-        [InlineKeyboardButton(text=f'🚪 {rooms_label}', callback_data='choose:rooms'),
-         InlineKeyboardButton(text='✅ Собственник' if f.owner_only else '👤 Все', callback_data='owner')],
-        [InlineKeyboardButton(text='🔎 Найти', callback_data='scan'),
-         InlineKeyboardButton(text='🔕 Стоп' if f.watching else '🔔 Включить', callback_data='watch')],
-        [InlineKeyboardButton(text='🩺 Статус', callback_data='status')],
+        [InlineKeyboardButton(text='Проверить квартиры', callback_data='scan')],
     ])
 
 
@@ -98,8 +92,8 @@ def map_url(ad: Listing) -> str:
 
 def ad_keyboard(ad: Listing) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f'Открыть на {ad.source}', url=ad.url)],
-        [InlineKeyboardButton(text='🚶 Посмотреть пеший маршрут', url=map_url(ad))],
+        [InlineKeyboardButton(text='Объявление', url=ad.url),
+         InlineKeyboardButton(text='Маршрут', url=map_url(ad))],
     ])
 
 
@@ -109,10 +103,10 @@ def listing_text(ad: Listing) -> str:
     price = (f'{ad.price:,}'.replace(',', ' ') + f' {ad.currency}/мес.') if ad.price is not None else 'цена не указана'
     owner = 'Собственник' if ad.owner is True else 'Агентство' if ad.owner is False else 'Не указано'
     return (
-        f'<b>🏠 {html.escape(ad.title)}</b>\n'
-        f'🚶 <b>{minutes} мин до работы</b> · 💵 <b>{html.escape(price)}</b>\n'
-        f'👤 {owner} · 🌐 {html.escape(ad.source)}\n'
-        f'📍 {html.escape(ad.address)}'
+        f'<b>{html.escape(ad.title)}</b>\n'
+        f'<b>{minutes} мин пешком</b> · <b>{html.escape(price)}</b>\n'
+        f'{owner} · {html.escape(ad.source)}\n'
+        f'{html.escape(ad.address)}'
     )
 
 
@@ -211,7 +205,7 @@ def summary_text(scan: Scan) -> str:
 
 async def do_search(bot: Bot, chat_id: int, user_id: int, *, seed: bool = False) -> None:
     flt = repo.get_user(user_id)
-    progress = await bot.send_message(chat_id, '🔎 Ищу квартиры…')
+    progress = await bot.send_message(chat_id, 'Ищу квартиры…')
     try:
         scan = await engine.scan(max_walk_minutes=flt.walk_minutes)
     except Exception:
@@ -219,11 +213,11 @@ async def do_search(bot: Bot, chat_id: int, user_id: int, *, seed: bool = False)
         await progress.edit_text('⚠️ Не удалось проверить объявления. Повторю позже.')
         return
     found = scan.filtered(flt)
-    warning = ' · ⚠️ часть сайтов недоступна' if any(not s.ok for s in scan.sources) else ''
-    prefix = '🔔 Мониторинг включён\n' if seed else ''
-    await progress.edit_text(prefix + f'🏠 Подходящих: <b>{len(found)}</b>{warning}', parse_mode='HTML')
+    warning = ' · часть сайтов недоступна' if any(not s.ok for s in scan.sources) else ''
+    prefix = 'Мониторинг включён\n' if seed else ''
+    await progress.edit_text(prefix + f'Подходящих: <b>{len(found)}</b>{warning}', parse_mode='HTML')
     delivered: list[str] = []
-    for ad in found[:6]:
+    for ad in found[:12]:
         try:
             await send_listing(bot, chat_id, ad)
             delivered.append(ad.key)
@@ -233,8 +227,8 @@ async def do_search(bot: Bot, chat_id: int, user_id: int, *, seed: bool = False)
         except TelegramBadRequest as exc:
             log.warning('Telegram rejected listing %s: %s', ad.key, exc)
     if seed:
-        undelivered = {ad.key for ad in found[:6]} - set(delivered)
-        repo.mark_seen(user_id, [ad.key for ad in found if ad.key not in undelivered])
+        # Do not silently hide a backlog of matches from future monitoring.
+        repo.mark_seen(user_id, delivered)
 
 
 @router.message(CommandStart())

@@ -68,39 +68,16 @@ async function updateSettings(gh, change) {
   throw new Error('Settings conflict');
 }
 function menuText(s) {
-  const price = s.max_price_usd ? `${s.max_price_usd} $` : ru('bez limita');
-  const rooms = s.rooms === 0 ? ru('lyubye') : s.rooms === 4 ? '4+' : s.rooms;
+  const price = s.max_price_usd ? `${s.max_price_usd} $` : 'без лимита';
+  const rooms = s.rooms === 0 ? 'любые' : s.rooms === 4 ? '4+' : s.rooms;
   return [
-    `<b>${ru('Nastrojki')}</b>`,
-    `${ru('Peshkom')}: ${s.walk_minutes} ${ru('min')}  |  ${ru('Byudzhet')}: ${price}`,
-    `${ru('Komnaty')}: ${rooms}  |  ${ru('Sobstvennik')}: ${s.owner_only ? ru('da') : ru('net')}`,
-    `${ru('Monitoring')}: ${s.watching ? ru('vklyuchen') : ru('vyklyuchen')}`,
+    `<b>Фильтры</b>: ${s.walk_minutes} мин пешком · ${price}`,
+    `Комнаты: ${rooms} · Собственник: ${s.owner_only ? 'да' : 'нет'}`,
+    `Мониторинг: ${s.watching ? 'включён' : 'выключен'}`,
   ].join('\n');
 }
-function menuKeyboard(s, panelUrl) {
-  return { inline_keyboard: [
-    [
-      { text: `${ru('Peshkom')}: ${s.walk_minutes} ${ru('min')}`, callback_data: 'choose:walk' },
-      { text: `${ru('Byudzhet')}: ${s.max_price_usd ? `${s.max_price_usd} $` : ru('lyuboj')}`, callback_data: 'choose:budget' },
-    ],
-    [
-      { text: `${ru('Komnaty')}: ${s.rooms || ru('lyubye')}`, callback_data: 'choose:rooms' },
-      { text: `${ru('Sobstvennik')}: ${s.owner_only ? ru('da') : ru('net')}`, callback_data: `owner:${s.owner_only ? 'off' : 'on'}` },
-    ],
-    [{ text: s.watching ? ru("Ostanovit' monitoring") : ru("Vklyuchit' monitoring"), callback_data: `watch:${s.watching ? 'off' : 'on'}` }],
-    [{ text: ru("Proverit' kvartiry"), callback_data: 'scan' }],
-    [{ text: ru("Panel' nastroek"), url: panelUrl }],
-  ] };
-}
-function chooseKeyboard(kind) {
-  let choices = [];
-  if (kind === 'walk') choices = [10, 15, 20, 25, 30, 40].map(n => [`${n} ${ru('min')}`, `walk:${n}`]);
-  else if (kind === 'budget') choices = [400, 500, 600, 700, 800, 0].map(n => [n ? `${n} $` : ru('Bez limita'), `budget:${n}`]);
-  else choices = [0, 1, 2, 3, 4].map(n => [n ? (n === 4 ? '4+' : String(n)) : ru('Lyubye'), `rooms:${n}`]);
-  const rows = [];
-  for (let i = 0; i < choices.length; i += 3) rows.push(choices.slice(i, i + 3).map(([text, callback_data]) => ({ text, callback_data })));
-  rows.push([{ text: ru('Nazad'), callback_data: 'choose:menu' }]);
-  return { inline_keyboard: rows };
+function panelLink(panelUrl) {
+  return `<a href="${panelUrl}">Открыть панель настроек</a>`;
 }
 async function telegramCall(config, method, body) {
   const result = await fetch(`https://api.telegram.org/bot${config.token}/${method}`, {
@@ -111,21 +88,29 @@ async function telegramCall(config, method, body) {
   if (!data.ok) throw new Error(`Telegram ${method} returned not-ok`);
   return data.result;
 }
-async function send(config, chat, text, reply_markup = undefined) {
-  return telegramCall(config, 'sendMessage', { chat_id: chat, text, parse_mode: 'HTML', ...(reply_markup ? { reply_markup } : {}) });
+async function send(config, chat, text) {
+  // Proactively remove legacy, space-hungry reply keyboards on every command.
+  // No new persistent or multi-row inline keyboards are ever created.
+  return telegramCall(config, 'sendMessage', {
+    chat_id: chat, text, parse_mode: 'HTML', reply_markup: { remove_keyboard: true },
+    disable_web_page_preview: true,
+  });
 }
-async function editOrSend(config, callback, chat, text, keyboard) {
+async function editOrSend(config, callback, chat, text) {
   const messageId = callback?.message?.message_id;
   if (messageId) {
     try {
-      await telegramCall(config, 'editMessageText', { chat_id: chat, message_id: messageId, text, parse_mode: 'HTML', reply_markup: keyboard });
+      // Clear the six-row inline keyboard on any old menu the user presses.
+      await telegramCall(config, 'editMessageText', {
+        chat_id: chat, message_id: messageId, text, parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [] }, disable_web_page_preview: true,
+      });
       return;
     } catch (err) {
-      // An old message can no longer be edited, or content did not change.
-      if (String(err.message).includes('400')) return;
+      // A non-editable old message falls back to a new text-only reply.
     }
   }
-  await send(config, chat, text, keyboard);
+  await send(config, chat, text);
 }
 async function dispatchScan(config) {
   const result = await fetch(`https://api.github.com/repos/${config.repo}/dispatches`, {
@@ -150,6 +135,9 @@ function parseAction(text) {
   if (minutes) return { name: '/walk', argument: minutes[1] };
   const price = value.match(/(\d{1,6})\s*\$/);
   if (price) return { name: '/budget', argument: price[1] };
+  if (value.toLowerCase().includes('включить мониторинг')) return { name: '/watch' };
+  if (value.toLowerCase().includes('остановить мониторинг')) return { name: '/stop' };
+  if (value.toLowerCase().includes('проверить квартиры')) return { name: '/search' };
   if (value.toLowerCase().includes(ru('sobstvennik'))) return { name: '/owner' };
   return { name: '/menu' };
 }
@@ -205,34 +193,35 @@ export default async function handler(request) {
     const rawAction = callback ? actionFromCallback(callback.data) : parseAction(message?.text);
     const action = rawAction || { name: '/menu' };
     if (action.name === '/start' || action.name === '/hide') {
-      // This removes the old large keyboard once. The following message uses
-      // only a compact inline keyboard, not ReplyKeyboardMarkup.
-      await send(config, chat.id, ru("Bol'shaya klaviatura skryta."), { remove_keyboard: true });
-      if (action.name === '/hide') return json({ ok: true });
+      await send(config, chat.id, action.name === '/hide'
+        ? 'Большая клавиатура скрыта. Настройки: /menu'
+        : `Бот работает. /menu · /search\n${panelLink(panelUrl)}`);
+      return json({ ok: true });
     }
     if (callback?.data?.startsWith('choose:') && callback.data !== 'choose:menu') {
       const kind = callback.data.slice(7);
       if (['walk','budget','rooms'].includes(kind)) {
-        const intro = kind === 'walk' ? ru('Vremya peshkom') : kind === 'budget' ? ru('Byudzhet') : ru('Komnaty');
-        await editOrSend(config, callback, chat.id, `<b>${intro}</b>`, chooseKeyboard(kind));
+        const example = kind === 'walk' ? '/walk 25' : kind === 'budget' ? '/budget 550' : '/rooms 1';
+        await editOrSend(config, callback, chat.id, `${example}\n${panelLink(panelUrl)}`);
         return json({ ok: true });
       }
     }
     if (action.name === '/search' || callback?.data === 'scan') {
       await dispatchScan(config);
-      await send(config, chat.id, ru('Proverka zapushchena. Ob"yavleniya pridut otdel"no.'));
+      await send(config, chat.id, 'Проверка запущена. Результаты придут отдельно.');
       return json({ ok: true });
     }
     if (action.name === '/status' || callback?.data === 'status') {
       const state = await fetchSettings(gh);
-      const last = state.state.last_scan_at || ru('eshche ne bylo');
-      await send(config, chat.id, `${ru('Poslednyaya proverka')}: ${last}\n${menuText(state.settings)}`);
+      const last = state.state.last_scan_at || 'ещё не было';
+      const count = Number.isInteger(state.state.last_matches) ? state.state.last_matches : null;
+      await send(config, chat.id, `Последняя проверка: ${last}${count !== null ? `\nПодошло: ${count}` : ''}\n${menuText(state.settings)}`);
       return json({ ok: true });
     }
     if (['/walk','/budget','/rooms'].includes(action.name) && !action.argument) {
       const kind = action.name.slice(1);
-      const intro = kind === 'walk' ? ru('Vremya peshkom') : kind === 'budget' ? ru('Byudzhet') : ru('Komnaty');
-      await editOrSend(config, callback, chat.id, `<b>${intro}</b>`, chooseKeyboard(kind));
+      const example = kind === 'walk' ? '/walk 25' : kind === 'budget' ? '/budget 550' : '/rooms 1';
+      await editOrSend(config, callback, chat.id, `${example}\n${panelLink(panelUrl)}`);
       return json({ ok: true });
     }
     if (['/owner','/watch','/stop','/walk','/budget','/rooms'].includes(action.name)) {
@@ -245,11 +234,11 @@ export default async function handler(request) {
         }
         throw e;
       }
-      await editOrSend(config, callback, chat.id, menuText(settings), menuKeyboard(settings, panelUrl));
+      await editOrSend(config, callback, chat.id, `${menuText(settings)}\n${panelLink(panelUrl)}`);
       return json({ ok: true });
     }
     const state = await fetchSettings(gh);
-    await editOrSend(config, callback, chat.id, menuText(state.settings), menuKeyboard(state.settings, panelUrl));
+    await editOrSend(config, callback, chat.id, `${menuText(state.settings)}\n${panelLink(panelUrl)}`);
     return json({ ok: true });
   } catch (error) {
     console.error('Telegram webhook processing failed:', error.message);

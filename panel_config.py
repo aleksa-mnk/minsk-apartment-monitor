@@ -45,5 +45,7 @@ def apply_panel_config(state: dict, path: Path = DEFAULT_PATH) -> bool:
     if state.get('panel_revision', '') == revision:
         return False
     state.update(settings)
+    # A new filter set should start browsing matches from the beginning.
+    state['manual_offset'] = 0
     state['panel_revision'] = revision
     return True

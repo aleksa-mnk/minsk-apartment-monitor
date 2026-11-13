@@ -122,7 +122,7 @@ def test_preview_uses_seen_state_and_new_ads_only(app):
     assert state['seen'] == ['k1', 'k2', 'k3', 'k4']
 
 
-def test_failed_preview_is_retried_not_silently_marked_seen(app, monkeypatch):
+def test_bad_listing_does_not_prevent_later_apartments_from_arriving(app, monkeypatch):
     state = app.read_state(Path('/unlikely-path-for-state.json'))
     tg = DummyBot()
     async def flaky_send(_tg, _chat, listing):
@@ -136,9 +136,60 @@ def test_failed_preview_is_retried_not_silently_marked_seen(app, monkeypatch):
         second = await app.send_adverts(tg, 5, state, DummyScan([ad(1), ad(2), ad(3)]),
                                         Filters(), force_search=False)
         return first, second
-    assert asyncio.run(scenario()) == (1, 0)
-    assert state['seen'] == ['k1']
+    assert asyncio.run(scenario()) == (2, 0)
+    assert state['seen'] == ['k1', 'k3']
     assert state['initialized'] is True
+
+
+def test_automatic_monitor_delivers_all_batches_without_silently_hiding_ads(app):
+    state = app.read_state(Path('/unlikely-path-for-state.json'))
+    tg = DummyBot()
+    scan = DummyScan([ad(n) for n in range(1, 22)])
+
+    async def scenario():
+        first = await app.send_adverts(tg, 5, state, scan, Filters(), force_search=False)
+        second = await app.send_adverts(tg, 5, state, scan, Filters(), force_search=False)
+        third = await app.send_adverts(tg, 5, state, scan, Filters(), force_search=False)
+        fourth = await app.send_adverts(tg, 5, state, scan, Filters(), force_search=False)
+        return first, second, third, fourth
+
+    assert asyncio.run(scenario()) == (8, 8, 5, 0)
+    assert tg.adverts == [f'k{n}' for n in range(1, 22)]
+    assert len(state['seen']) == 21
+
+
+def test_manual_search_pages_through_old_ads_from_legacy_seen_file(app):
+    state = app.read_state(Path('/unlikely-path-for-state.json'))
+    state['initialized'] = True
+    state['seen'] = [f'k{n}' for n in range(1, 20)]
+    tg = DummyBot()
+    scan = DummyScan([ad(n) for n in range(1, 20)])
+
+    async def scenario():
+        first = await app.send_adverts(tg, 5, state, scan, Filters(), force_search=True)
+        offset1 = state['manual_offset']
+        second = await app.send_adverts(tg, 5, state, scan, Filters(), force_search=True)
+        offset2 = state['manual_offset']
+        third = await app.send_adverts(tg, 5, state, scan, Filters(), force_search=True)
+        return first, offset1, second, offset2, third
+
+    assert asyncio.run(scenario()) == (12, 12, 7, 0, 12)
+    assert tg.adverts[:12] == [f'k{n}' for n in range(1, 13)]
+    assert tg.adverts[12:19] == [f'k{n}' for n in range(13, 20)]
+
+
+def test_manual_offset_is_backward_compatible_with_previous_state(app, tmp_path):
+    state_path = tmp_path / 'state.json'
+    state_path.write_text('{"initialized": true, "seen": ["k1"]}', encoding='utf-8')
+    loaded = app.read_state(state_path)
+    assert loaded['manual_offset'] == 0
+    assert loaded['seen'] == ['k1']
+
+
+def test_listing_source_can_scan_more_than_old_five_page_limit():
+    from sources import ListingSources
+    assert ListingSources(None, pages=6).pages == 6
+    assert ListingSources(None, pages=100).pages == 8
 
 
 def test_owner_filter_maintained_on_github_runner(app):
@@ -246,7 +297,8 @@ def test_queued_commands_produce_one_short_reply(app, tmp_path):
         store.close()
 
 
-def test_old_persistent_keyboard_removed_once_even_without_commands(app):
+def test_old_persistent_keyboard_removed_once_even_without_commands(app, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_MODE", "0")
     state = app.read_state(Path('/unlikely-path-for-state.json'))
     state['watching'] = False
     state['ui_version'] = 2  # stored by previous bot version
@@ -278,5 +330,21 @@ def test_hide_command_also_removes_keyboard_when_already_migrated(app):
         assert len(tg.messages) == 1
         assert isinstance(tg.markups[0], sys.modules['aiogram.types'].ReplyKeyboardRemove)
         assert state['ui_version'] == 3
+    finally:
+        store.close()
+
+
+def test_webhook_mode_never_calls_telegram_get_updates(app, monkeypatch):
+    monkeypatch.setenv('TELEGRAM_WEBHOOK_MODE', '1')
+    state = app.read_state(Path('/unlikely-path-for-state.json'))
+    state['watching'] = False
+    tg = DummyBot()
+    async def forbidden_get_updates(**_kwargs):
+        raise AssertionError('getUpdates is incompatible with setWebhook')
+    tg.get_updates = forbidden_get_updates
+    store = Store(':memory:')
+    try:
+        asyncio.run(app.scheduled_cycle(tg, 5, state, store, None))
+        assert tg.messages == []
     finally:
         store.close()
