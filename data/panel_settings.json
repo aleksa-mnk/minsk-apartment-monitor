@@ -1,10 +1,10 @@
 {
-  "revision": "3776276e-7bc9-4d4c-a470-5e38b581e155",
+  "revision": "57578426-0588-4b7a-99f3-e7b97f61be3f",
   "settings": {
-    "walk_minutes": 25,
+    "walk_minutes": 20,
     "max_price_usd": 550,
     "rooms": 0,
-    "owner_only": false,
+    "owner_only": true,
     "watching": true
   }
 }
