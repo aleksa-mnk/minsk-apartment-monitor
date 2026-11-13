@@ -1,0 +1,32 @@
+Обновление для Telegram-бота: кнопка «Меню» и подсказки при вводе «/».
+
+Что меняется:
+- В Telegram появляется кнопка «Меню» возле поля ввода.
+- При вводе / отображаются команды с короткими описаниями.
+- /menu выводит текущие настройки.
+- /budget 600 / /budget 0 изменяет бюджет.
+- /rooms 0..4 задаёт число комнат.
+- /owner on / /owner off включает и выключает фильтр собственника.
+- /watch, /stop, /search, /status доступны в меню.
+- Существующая логика источников, маршрутов, фотографий и фильтров сохранена.
+
+На Windows: в PowerShell, открытом в папке текущего git-проекта,
+например C:\Users\usr\Downloads\minsk_walk_rent_bot\minsk_walk_rent_bot:
+
+1. Скопируйте архив в Загрузки, распакуйте поверх папки проекта:
+   Expand-Archive -Path "$env:USERPROFILE\Downloads\minsk_bot_menu_update.zip" -DestinationPath . -Force
+
+2. Для появления меню в Telegram сразу (если в проекте есть .env с BOT_TOKEN):
+   .\.venv\Scripts\python.exe setup_menu.py
+
+3. Отправьте изменения в GitHub:
+   git add bot.py scheduled_check.py telegram_menu.py setup_menu.py
+   git commit -m "Add Telegram command menu"
+   git push origin main
+
+После этого в GitHub Actions scheduled_check.py также самостоятельно
+устанавливает меню, когда запускается с правильным BOT_TOKEN.
+
+Важно: в версии GitHub Actions команды /budget 600 и прочие применяются
+при следующем запуске по расписанию, а не мгновенно.
+Никогда не добавляйте .env или BOT_TOKEN в репозиторий.

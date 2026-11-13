@@ -1,0 +1,10 @@
+Минималистичная панель для твоего Telegram-бота
+
+1. Распакуй minsk_netlify_panel_update.zip поверх существующего проекта.
+2. Выполни git add / git commit / git push из README.md.
+3. Создай fine-grained token GitHub (Contents: Read and write, только твой репозиторий).
+4. В Netlify добавь GITHUB_REPO, GITHUB_PANEL_TOKEN и PANEL_PASSWORD.
+5. Trigger deploy → Deploy site.
+
+Настройки из панели применяются при следующем запуске GitHub Actions.
+Токены нельзя добавлять в файлы проекта.

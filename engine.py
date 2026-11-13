@@ -37,7 +37,7 @@ class Engine:
         self._last_scan: Scan | None = None
         self._last_time = 0.0
 
-    async def scan(self, *, fresh: bool = False) -> Scan:
+    async def scan(self, *, fresh: bool = False, max_walk_minutes: int = 20) -> Scan:
         """Only one simultaneous external scan, so repeated /search cannot hammer portals."""
         async with self._lock:
             # Try the address index in parallel with site downloads. An old index
@@ -60,7 +60,7 @@ class Engine:
                 if ad.lat is None or ad.lon is None:
                     missing_geo += 1
                     continue
-                if near_work(ad):
+                if near_work(ad, max_walk_minutes=max_walk_minutes):
                     prefiltered.append(ad)
             routes = await self.foot.measure(prefiltered)
             done: list[Listing] = []

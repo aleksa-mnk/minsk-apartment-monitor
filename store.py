@@ -19,7 +19,8 @@ class Store:
                 max_price_usd INTEGER NOT NULL DEFAULT 0,
                 rooms INTEGER NOT NULL DEFAULT 0,
                 owner_only INTEGER NOT NULL DEFAULT 0,
-                watching INTEGER NOT NULL DEFAULT 0
+                watching INTEGER NOT NULL DEFAULT 0,
+                walk_minutes INTEGER NOT NULL DEFAULT 20
             );
             CREATE TABLE IF NOT EXISTS seen (
                 user_id INTEGER NOT NULL, key TEXT NOT NULL,
@@ -42,6 +43,10 @@ class Store:
                 ok INTEGER NOT NULL, total INTEGER NOT NULL, error TEXT
             );
         ''')
+        # Existing installations have the old users table; retain every filter.
+        columns = {row['name'] for row in self.db.execute('PRAGMA table_info(users)')}
+        if 'walk_minutes' not in columns:
+            self.db.execute('ALTER TABLE users ADD COLUMN walk_minutes INTEGER NOT NULL DEFAULT 20')
         self.db.commit()
 
     def get_user(self, user_id: int) -> Filters:
@@ -51,14 +56,15 @@ class Store:
         return Filters(
             max_price_usd=row['max_price_usd'], rooms=row['rooms'],
             owner_only=bool(row['owner_only']), watching=bool(row['watching']),
+            walk_minutes=int(row['walk_minutes']),
         )
 
     def update_user(self, user_id: int, **changes) -> Filters:
         current = self.get_user(user_id)
         updated = replace(current, **changes)
         self.db.execute(
-            'UPDATE users SET max_price_usd=?, rooms=?, owner_only=?, watching=? WHERE user_id=?',
-            (updated.max_price_usd, updated.rooms, int(updated.owner_only), int(updated.watching), user_id),
+            'UPDATE users SET max_price_usd=?, rooms=?, owner_only=?, watching=?, walk_minutes=? WHERE user_id=?',
+            (updated.max_price_usd, updated.rooms, int(updated.owner_only), int(updated.watching), updated.walk_minutes, user_id),
         )
         self.db.commit()
         return updated

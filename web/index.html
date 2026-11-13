@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f5">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Мониторинг квартир · Минск</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="site-header">
+      <div class="identity"><div class="mark" aria-hidden="true">M</div><div><strong>МИНСК</strong><span>Поиск квартиры</span></div></div>
+      <a class="telegram-link" href="https://t.me/aleksa_realt_bot" target="_blank" rel="noopener noreferrer">Открыть Telegram <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main class="main-content">
+      <section id="login-view" class="login-view" aria-labelledby="login-title">
+        <p class="eyebrow">Личная панель</p>
+        <h1 id="login-title">Настройки поиска.</h1>
+        <p class="intro">Один пароль, все фильтры в одном месте.</p>
+        <form id="login-form" class="login-form">
+          <label class="field-label" for="password">Пароль панели</label>
+          <input id="password" class="text-input" type="password" name="password" autocomplete="current-password" minlength="12" required placeholder="Введите пароль">
+          <button class="primary-button" type="submit" id="login-button">Войти</button>
+        </form>
+      </section>
+
+      <section id="dashboard-view" class="dashboard" aria-labelledby="dashboard-title" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Личная панель</p>
+            <h1 id="dashboard-title">Поиск квартиры.</h1>
+            <p class="intro">Минск, Мележа 5к1 <span class="divider-dot" aria-hidden="true">·</span> долгосрочная аренда</p>
+          </div>
+          <button class="text-button" type="button" id="logout-button">Выйти</button>
+        </div>
+
+        <form id="settings-form" class="settings-card">
+          <div class="setting-group walk-group">
+            <div class="setting-title-row">
+              <div><label class="section-label" for="walk-range">Время до работы</label><p class="small-muted">Пешком, по маршруту</p></div>
+              <div class="value-with-units"><output id="walk-value" for="walk-range">20</output><span>мин</span></div>
+            </div>
+            <input type="range" id="walk-range" min="5" max="45" step="1" value="20">
+            <div class="slider-labels"><span>5 мин</span><span>45 мин</span></div>
+          </div>
+
+          <div class="setting-group">
+            <label class="section-label" for="budget-input">Бюджет в месяц</label>
+            <div class="budget-control">
+              <input id="budget-input" type="number" min="0" max="100000" step="1" inputmode="numeric" placeholder="Без ограничений">
+              <span class="currency">USD</span>
+            </div>
+            <p class="small-muted">Оставь поле пустым, если цена не важна.</p>
+          </div>
+
+          <fieldset class="setting-group rooms-group">
+            <legend class="section-label">Комнаты</legend>
+            <div class="segmented" role="radiogroup" aria-label="Количество комнат">
+              <label><input type="radio" name="rooms" value="0" checked><span>Любые</span></label>
+              <label><input type="radio" name="rooms" value="1"><span>1</span></label>
+              <label><input type="radio" name="rooms" value="2"><span>2</span></label>
+              <label><input type="radio" name="rooms" value="3"><span>3</span></label>
+              <label><input type="radio" name="rooms" value="4"><span>4+</span></label>
+            </div>
+          </fieldset>
+
+          <div class="setting-group toggle-group">
+            <label for="owner-only" class="toggle-row">
+              <span><span class="section-label">Только собственники</span><span class="small-muted">Без агентств и посредников</span></span>
+              <span class="switch"><input id="owner-only" type="checkbox"><span class="switch-track" aria-hidden="true"></span></span>
+            </label>
+          </div>
+
+          <div class="setting-group toggle-group last-group">
+            <label for="watching" class="toggle-row">
+              <span><span class="section-label">Мониторинг включён</span><span class="small-muted">Получать новые квартиры в Telegram</span></span>
+              <span class="switch"><input id="watching" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span></span>
+            </label>
+          </div>
+          <div class="form-footer">
+            <button class="primary-button save-button" type="submit" id="save-button" disabled>Сохранить настройки</button>
+            <p id="check-status" class="footnote">Настройки применяются при следующей проверке.</p>
+          </div>
+        </form>
+        <div class="bottom-bar"><span id="last-scan">Проверка по расписанию GitHub Actions</span><span>Куфар · Realt · Onliner</span></div>
+      </section>
+      <p id="message" class="message" role="status" aria-live="polite"></p>
+    </main>
+
+    <footer class="site-footer"><span>Личный мониторинг квартир</span><span>Минск</span></footer>
+  </div>
+</body>
+</html>
