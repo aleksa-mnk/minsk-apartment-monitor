@@ -1,10 +1,17 @@
 {
-  "initialized": false,
+  "initialized": true,
   "max_price_usd": 0,
   "owner_only": false,
   "rooms": 0,
-  "seen": [],
-  "update_offset": 0,
+  "seen": [
+    "onliner:801516",
+    "onliner:885819",
+    "onliner:887735",
+    "realt:1592342",
+    "realt:4246751",
+    "realt:4257261"
+  ],
+  "update_offset": 358421289,
   "version": 1,
   "watching": true
 }
