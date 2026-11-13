@@ -255,8 +255,13 @@ async def scheduled_cycle(tg: Bot, chat_id: int, state: dict, store: Store, engi
     telegram_ui.repo = store
     telegram_ui.engine = engine
     sync_filters_to_store(store, chat_id, state)
-    force_search = await handle_commands(tg, chat_id, state, store, engine)
-    if state['ui_version'] < 3:
+    # Telegram webhook on Netlify handles all messages and callbacks immediately.
+    # getUpdates cannot be used while a webhook is configured.
+    webhook = os.getenv('TELEGRAM_WEBHOOK_MODE', '1') == '1'
+    force_search = os.getenv('FORCE_SEARCH', '0') == '1'
+    if not webhook:
+        force_search = await handle_commands(tg, chat_id, state, store, engine) or force_search
+    if not webhook and state['ui_version'] < 3:
         # Migration: Telegram keeps old reply keyboards until the bot explicitly
         # removes them. Do this once even when no commands are waiting.
         await tg.send_message(
@@ -284,6 +289,8 @@ async def scheduled_cycle(tg: Bot, chat_id: int, state: dict, store: Store, engi
     )
     state['last_sent'] = delivered
     log.info('Delivered %s Telegram messages', delivered)
+    if force_search and delivered == 0:
+        await tg.send_message(chat_id, '\u041d\u043e\u0432\u044b\u0445 \u043a\u0432\u0430\u0440\u0442\u0438\u0440 \u043d\u0435\u0442.')
 
 
 async def main() -> None:

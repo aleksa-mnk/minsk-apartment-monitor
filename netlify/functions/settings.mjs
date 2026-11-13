@@ -28,7 +28,7 @@ function constantTimeEquals(a, b) {
   return timingSafeEqual(left, right);
 }
 
-function validSettings(value) {
+export function validSettings(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   if (Object.keys(value).sort().join('|') !== FILTER_FIELDS.slice().sort().join('|')) return null;
   const { walk_minutes, max_price_usd, rooms, owner_only, watching } = value;
@@ -39,19 +39,19 @@ function validSettings(value) {
   return { walk_minutes, max_price_usd, rooms, owner_only, watching };
 }
 
-function settingsFromState(state) {
+export function settingsFromState(state) {
   const candidate = Object.fromEntries(
     FILTER_FIELDS.map(key => [key, state && Object.hasOwn(state, key) ? state[key] : DEFAULTS[key]])
   );
   return validSettings(candidate) || { ...DEFAULTS };
 }
 
-function settingsFromPanel(panel) {
+export function settingsFromPanel(panel) {
   if (!panel || typeof panel.revision !== 'string' || !panel.revision) return null;
   return validSettings(panel.settings);
 }
 
-function makeGitHubApi({ repo, token, branch }) {
+export function makeGitHubApi({ repo, token, branch }) {
   const apiUrl = `https://api.github.com/repos/${repo}/contents/`;
   const headers = {
     Accept: 'application/vnd.github+json',

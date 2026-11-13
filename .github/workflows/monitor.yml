@@ -5,6 +5,8 @@ on:
     # Every 30 minutes, shifted off the top of the hour.
     - cron: '17,47 * * * *'
   workflow_dispatch:
+  repository_dispatch:
+    types: [minsk_scan]
 
 permissions:
   contents: write
@@ -45,6 +47,8 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DB_PATH: data/apartments.sqlite3
+          TELEGRAM_WEBHOOK_MODE: '1'
+          FORCE_SEARCH: ${{ github.event_name == 'repository_dispatch' && '1' || '0' }}
         run: python scheduled_check.py
 
       - name: Persist seen listings and filters in private repository
