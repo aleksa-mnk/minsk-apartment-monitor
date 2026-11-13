@@ -19,6 +19,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from models import Listing, valid_minsk_coordinate
+from addresses import address_key
 from photo_delivery import is_https_photo_url
 
 log = logging.getLogger(__name__)
@@ -67,36 +68,40 @@ def parse_pair(a: Any, b: Any) -> tuple[float, float] | None:
 
 
 def coordinates(obj: dict[str, Any]) -> tuple[float, float] | None:
-    """Find coordinates from documented or common vendor shape.
+    """Read coordinates only from location-like paths, including GeoJSON.
 
-    Only read location-like fields. Do not scan arbitrary numeric fields: house
-    numbers and prices must not become fake geographical coordinates.
+    `map.geometry.coordinates` and other nested paths are common. Never scan
+    arbitrary numeric fields: a flat's price or house number is not a point.
     """
-    variants: list[Any] = [obj]
-    for key in ('location', 'coordinates', 'coordinate', 'geo', 'geoLocation', 'map', 'point', 'position', 'geopoint'):
-        val = obj.get(key)
-        if val is not None:
-            variants.append(val)
-            if isinstance(val, dict):
-                for k2 in ('coords', 'coordinates', 'point', 'center', 'location'):
-                    if k2 in val:
-                        variants.append(val[k2])
-    for v in variants:
-        if isinstance(v, dict):
-            for la, lo in (('latitude', 'longitude'), ('lat', 'lon'), ('lat', 'lng'), ('lat', 'long'), ('y', 'x')):
-                hit = parse_pair(v.get(la), v.get(lo))
-                if hit:
-                    return hit
-        elif isinstance(v, (list, tuple)) and len(v) >= 2:
-            hit = parse_pair(v[0], v[1])
-            if hit:
-                return hit
-        elif isinstance(v, str):
-            m = re.fullmatch(r'\s*([\d.,]+)\s*[,; ]\s*([\d.,]+)\s*', v)
-            if m:
-                hit = parse_pair(m.group(1), m.group(2))
-                if hit:
-                    return hit
+    allowed = (
+        'location', 'coordinates', 'coordinate', 'geo', 'geoLocation',
+        'geolocation', 'map', 'mapPoint', 'point', 'position', 'geopoint',
+        'geometry', 'gps', 'coords', 'center',
+    )
+    queue: list[Any] = [obj]
+    processed = 0
+    while queue and processed < 40:
+        value = queue.pop(0)
+        processed += 1
+        if isinstance(value, dict):
+            for la, lo in (
+                ('latitude', 'longitude'), ('lat', 'lon'), ('lat', 'lng'),
+                ('lat', 'long'), ('y', 'x'),
+            ):
+                pt = parse_pair(value.get(la), value.get(lo))
+                if pt:
+                    return pt
+            queue.extend(value[name] for name in allowed if name in value)
+        elif isinstance(value, (list, tuple)) and len(value) >= 2:
+            pt = parse_pair(value[0], value[1])
+            if pt:
+                return pt
+        elif isinstance(value, str):
+            match = re.fullmatch(r'\s*([\d.]+)\s*[,; ]\s*([\d.]+)\s*', value)
+            if match:
+                pt = parse_pair(match.group(1), match.group(2))
+                if pt:
+                    return pt
     return None
 
 
@@ -163,19 +168,62 @@ def room_number(raw: Any) -> int | None:
 
 
 def _param(params: Any, *names: str) -> str:
+    """Read marketplace parameters without stringifying dicts/lists as addresses."""
     if isinstance(params, dict):
-        for n in names:
-            if params.get(n):
-                return str(params[n])
+        for name in names:
+            if name in params and params[name] not in (None, '', []):
+                return _value_as_address(params[name])
     if not isinstance(params, list):
         return ''
     for name in names:
-        for item in params:
-            if isinstance(item, dict) and item.get('p') == name:
-                val = item.get('vl') or item.get('v')
-                if val not in (None, '', []):
-                    return str(val)
+        for entry in params:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get('p') or entry.get('key') or entry.get('name')
+            if key != name:
+                continue
+            value = entry.get('vl')
+            if value in (None, '', []):
+                value = entry.get('v', entry.get('value'))
+            if value not in (None, '', []):
+                return _value_as_address(value)
     return ''
+
+
+def coordinates_from_parameters(params: Any) -> tuple[float, float] | None:
+    """Kufar may put a point in `ad_parameters`, not the top-level ad.
+
+    Accept only explicitly geographical fields, and validate it is in Minsk.
+    """
+    if not isinstance(params, list):
+        return None
+    found: dict[str, Any] = {}
+    for entry in params:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get('p') or entry.get('name') or entry.get('key') or '').lower()
+        val = entry.get('vl')
+        if val in (None, '', []):
+            val = entry.get('v', entry.get('value'))
+        if key in {'latitude', 'lat', 'longitude', 'lon', 'lng', 'long'}:
+            found[key] = val
+        elif key in {'geo', 'gps', 'coordinates', 'coordinate', 'geolocation', 'map', 'position', 'point'}:
+            if isinstance(val, dict):
+                pt = coordinates(val)
+            else:
+                pt = coordinates({'coordinates': val})
+            if pt:
+                return pt
+    return coordinates(found) if found else None
+
+
+def most_precise_address(*values: str) -> str:
+    """Prefer a real house address over a city/district label."""
+    candidates = [str(x).strip() for x in values if isinstance(x, str) and x.strip()]
+    for candidate in candidates:
+        if address_key(candidate):
+            return candidate
+    return candidates[0] if candidates else 'Адрес не указан'
 
 
 def _value_as_address(raw: Any) -> str:
@@ -185,6 +233,11 @@ def _value_as_address(raw: Any) -> str:
         for key in ('full', 'formatted', 'text', 'value', 'address', 'name'):
             if isinstance(raw.get(key), str) and raw[key].strip():
                 return raw[key].strip()
+    if isinstance(raw, (list, tuple)):
+        for item in raw:
+            result = _value_as_address(item)
+            if result:
+                return result
     return ''
 
 
@@ -245,11 +298,14 @@ def parse_kufar(payload: Any) -> list[Listing]:
         params = obj.get('ad_parameters') or obj.get('parameters') or []
         street = _param(params, 'address', 're_address', 'street', 're_street', 'rent_address')
         house = _param(params, 'house_number', 'house', 're_house')
-        loc = _value_as_address(obj.get('address')) or _value_as_address(obj.get('location'))
-        if not loc:
-            loc = (street + (f', {house}' if house and house not in street else '')).strip(', ')
-        if not loc:
-            loc = _param(params, 'district', 'region', 'area') or 'Адрес не указан'
+        street_house = (street + (f', {house}' if house and house not in street else '')).strip(', ')
+        # Some search responses have location='Минск' alongside a real street
+        # in ad_parameters. The old parser chose 'Минск' and lost the address.
+        loc = most_precise_address(
+            _value_as_address(obj.get('address')), street_house,
+            _value_as_address(obj.get('location')),
+            _param(params, 'district', 'region', 'area'),
+        )
         usd_cents = number(obj.get('price_usd') or obj.get('priceUsd'))
         byn_cents = number(obj.get('price_byn') or obj.get('priceByn'))
         price = round(usd_cents / 100) if usd_cents else round(byn_cents / 100) if byn_cents else None
@@ -268,7 +324,7 @@ def parse_kufar(payload: Any) -> list[Listing]:
                                         + str(pic['path']).lstrip('/'), 'Kufar')
                     if image:
                         break
-        pt = coordinates(obj)
+        pt = coordinates(obj) or coordinates_from_parameters(params)
         found.append(Listing(
             key=f'kufar:{ad_id}', source='Kufar', url=url,
             title=title, address=loc, price=price, currency=curr, rooms=room,
@@ -354,12 +410,15 @@ def parse_realt(payload: Any) -> list[Listing]:
         city = obj.get('townName') or obj.get('town') or obj.get('city') or ''
         if isinstance(city, str) and city and 'минск' not in city.lower():
             continue
-        raw_address = obj.get('address') or obj.get('fullAddress') or obj.get('street') or ''
-        address = _value_as_address(raw_address)
-        if not address:
-            street = str(obj.get('streetName') or obj.get('street') or '').strip()
-            house = str(obj.get('houseNumber') or obj.get('house') or '').strip()
-            address = street + ((', ' + house) if house else '')
+        street = _value_as_address(obj.get('streetName') or obj.get('street'))
+        house = str(obj.get('houseNumber') or obj.get('house') or '').strip()
+        street_house = street + ((', ' + house) if house and house not in street else '')
+        address = most_precise_address(
+            _value_as_address(obj.get('fullAddress')),
+            _value_as_address(obj.get('address')),
+            street_house,
+            _value_as_address(obj.get('location')),
+        )
         if address and 'минск' not in address.lower():
             address = 'Минск, ' + address
         pt = coordinates(obj)

@@ -60,7 +60,7 @@ def test_engine_partial_provider_outage_and_geo_index():
 
     class FakeAddress:
         error = None
-        async def ensure_index(self):
+        async def ensure_index(self, *, radius_m=2900):
             return True
         def resolve(self, text):
             return (WORK_LAT, WORK_LON) if 'Мележа' in text else None
@@ -95,3 +95,39 @@ def test_store_dedupe():
     repo.update_user(5, watching=False)
     assert not repo.watchers()
     repo.close()
+
+
+def test_engine_uses_extended_walk_prefilter():
+    far = Listing('x1', 'Onliner', 'https://ak.onliner.by/apartments/1',
+                  'Квартира', 'Мележа', lat=WORK_LAT + 0.035, lon=WORK_LON, price=550)
+
+    class OneSource:
+        async def fetch_all(self, force=False):
+            return [SourceResult('Onliner', [far])]
+
+    class ReadyAddresses:
+        error = None
+        async def ensure_index(self, *, radius_m=2900):
+            return True
+        def resolve(self, address):
+            return None
+
+    class Foot:
+        last_error = None
+        async def measure(self, ads):
+            return {point_key(ad.lat, ad.lon): (35 * 60, 3900) for ad in ads}
+
+    async def scenario():
+        store = Store(':memory:')
+        try:
+            engine = Engine(store, OneSource(), ReadyAddresses(), Foot())
+            old = await engine.scan(max_walk_minutes=20)
+            new = await engine.scan(max_walk_minutes=45)
+            assert len(old.ads) == 0
+            assert len(new.ads) == 1
+            assert len(new.filtered(Filters(walk_minutes=20))) == 0
+            assert len(new.filtered(Filters(walk_minutes=45))) == 1
+        finally:
+            store.close()
+
+    asyncio.run(scenario())

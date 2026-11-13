@@ -95,15 +95,20 @@ class AddressResolver:
         self._lock = asyncio.Lock()
         self._next_attempt = 0.0
 
-    async def ensure_index(self) -> bool:
+    async def ensure_index(self, *, radius_m: int = 2900) -> bool:
+        # A wider user-selected walking limit needs a wider address index.
+        # The previous fixed 2.9 km OSM index silently lost flats at 30-45 min.
+        radius_m = max(2900, min(6000, int(radius_m)))
         updated = self.store.get_meta_float('osm_index_updated')
-        if updated and time.time() - updated < self.refresh_days * 86400:
+        cached_radius = self.store.get_meta_float('osm_index_radius_m')
+        if updated and time.time() - updated < self.refresh_days * 86400 and cached_radius >= radius_m:
             return True
         if time.monotonic() < self._next_attempt:
             return self.store.address_count() > 0
         async with self._lock:
             updated = self.store.get_meta_float('osm_index_updated')
-            if updated and time.time() - updated < self.refresh_days * 86400:
+            cached_radius = self.store.get_meta_float('osm_index_radius_m')
+            if updated and time.time() - updated < self.refresh_days * 86400 and cached_radius >= radius_m:
                 return True
             if time.monotonic() < self._next_attempt:
                 return self.store.address_count() > 0
@@ -111,7 +116,7 @@ class AddressResolver:
             query = (
                 '[out:json][timeout:35];'
                 '(nwr["addr:street"]["addr:housenumber"]'
-                f'(around:2900,{WORK_LAT},{WORK_LON}););out center tags;'
+                f'(around:{radius_m},{WORK_LAT},{WORK_LON}););out center tags;'
             )
             errors = []
             for url in OVERPASS_SERVERS:
@@ -124,6 +129,7 @@ class AddressResolver:
                         raise ValueError(f'слишком мало адресов OSM: {len(index)}')
                     self.store.replace_addresses(index)
                     self.store.set_meta('osm_index_updated', str(time.time()))
+                    self.store.set_meta('osm_index_radius_m', str(radius_m))
                     self.error = None
                     log.info('OSM address index refreshed: %s exact addresses', len(index))
                     return True

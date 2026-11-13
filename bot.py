@@ -522,7 +522,7 @@ async def notify_loop(bot: Bot) -> None:
                 last_error_message = time.monotonic()
             for uid in subscribers:
                 flt = repo.get_user(uid)
-                matched = [ad for ad in scan.ads if matches(ad, flt) and not repo.has_seen(uid, ad.key)]
+                matched = [ad for ad in scan.ads if matches(ad, flt, byn_per_usd=scan.byn_per_usd) and not repo.has_seen(uid, ad.key)]
                 # Limit per check; do NOT mark omitted ads as seen. Retry next scan.
                 for ad in matched[:6]:
                     try:

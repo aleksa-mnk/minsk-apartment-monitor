@@ -73,11 +73,20 @@ def near_work(ad: Listing, max_walk_minutes: int = DEFAULT_WALK_MINUTES) -> bool
     )
 
 
-def matches(ad: Listing, flt: Filters) -> bool:
+def matches(ad: Listing, flt: Filters, *, byn_per_usd: float | None = None) -> bool:
     if ad.walk_seconds is None or ad.walk_seconds > flt.walk_minutes * 60:
         return False
     if flt.max_price_usd:
-        if ad.currency != 'USD' or ad.price is None or ad.price > flt.max_price_usd:
+        if ad.price is None:
+            return False
+        if ad.currency == 'USD':
+            estimated_usd = ad.price
+        elif ad.currency == 'BYN' and byn_per_usd is not None and byn_per_usd > 0:
+            estimated_usd = ad.price / byn_per_usd
+        else:
+            # Do not compare BYN numerically to USD or invent a rate.
+            return False
+        if estimated_usd > flt.max_price_usd:
             return False
     if flt.rooms:
         if ad.rooms is None:

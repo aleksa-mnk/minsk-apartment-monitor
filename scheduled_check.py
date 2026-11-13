@@ -289,9 +289,19 @@ async def scheduled_cycle(tg: Bot, chat_id: int, state: dict, store: Store, engi
     scan = await engine.scan(fresh=True, max_walk_minutes=state['walk_minutes'])
     for sr in scan.sources:
         log.info('%s: ok=%s fetched=%s error=%s', sr.source, sr.ok, len(sr.ads), sr.error)
+    current_filters = store.get_user(chat_id)
     log.info('Scanned %d ads, nearby=%d, unlocated=%d, unrouted=%d, matches=%d',
              scan.fetched, scan.candidates, scan.geo_missing, scan.unrouted,
-             len(scan.filtered(store.get_user(chat_id))))
+             len(scan.filtered(current_filters)))
+    log.info('USD/BYN NBRB reference rate: %s',
+             f'{scan.byn_per_usd:.4f}' if scan.byn_per_usd else 'unavailable (BYN prices cannot be checked)')
+    for source, stat in scan.diagnostics(current_filters).items():
+        log.info('SOURCE %s: fetched=%d, no_geo=%d, osm_resolved=%d, near=%d, '
+                 'routed=%d, walk_ok=%d, price_ok=%d, matched=%d',
+                 source, stat.get('fetched', 0), stat.get('geo_missing', 0),
+                 stat.get('geo_resolved', 0), stat.get('near_straight', 0),
+                 stat.get('routed', 0), stat.get('within_walk', 0),
+                 stat.get('price_ok', 0), stat.get('matched', 0))
     if not any(source.ok for source in scan.sources):
         raise RuntimeError('All three listing sources failed. Retry on the next schedule.')
     state['last_scan_at'] = now_utc()
@@ -308,7 +318,9 @@ async def scheduled_cycle(tg: Bot, chat_id: int, state: dict, store: Store, engi
     if force_search:
         # Explain the real number of matches instead of leaving the impression
         # that the bot intentionally shows only three listings.
-        summary = f'По фильтрам: {len(matched)} квартир из {scan.fetched} проверенных.'
+        by_site = scan.diagnostics(current)
+        source_counts = ', '.join(f'{name} {st.get("matched", 0)}' for name, st in by_site.items())
+        summary = f'Подходит: {len(matched)}. {source_counts}.'
         if len(matched) > MANUAL_BATCH:
             if state['manual_offset']:
                 summary += ' Остальные: нажми /search ещё раз.'
@@ -344,7 +356,7 @@ async def main() -> None:
     }
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=True, headers=headers) as client:
-            src = ListingSources(client, pages=max(1, min(8, int(os.getenv('PAGES_PER_SOURCE', '6')))))
+            src = ListingSources(client, pages=max(1, min(8, int(os.getenv('PAGES_PER_SOURCE', '8')))))
             resolver = AddressResolver(client, store)
             pedestrian = PedestrianRouter(client, store)
             engine = Engine(store, src, resolver, pedestrian)
