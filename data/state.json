@@ -1,6 +1,6 @@
 {
   "initialized": true,
-  "last_scan_at": "2026-11-13T16:17:19+00:00",
+  "last_scan_at": "2026-11-13T16:21:03+00:00",
   "last_sent": 3,
   "max_price_usd": 550,
   "owner_only": false,
@@ -15,7 +15,7 @@
     "realt:4257261"
   ],
   "ui_version": 2,
-  "update_offset": 358421298,
+  "update_offset": 358421300,
   "version": 1,
   "walk_minutes": 20,
   "watching": false
