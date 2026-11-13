@@ -1,7 +1,10 @@
 {
   "initialized": true,
-  "max_price_usd": 0,
+  "last_scan_at": "2026-11-13T16:17:19+00:00",
+  "last_sent": 3,
+  "max_price_usd": 550,
   "owner_only": false,
+  "panel_revision": "",
   "rooms": 0,
   "seen": [
     "onliner:801516",
@@ -11,7 +14,9 @@
     "realt:4246751",
     "realt:4257261"
   ],
-  "update_offset": 358421289,
+  "ui_version": 2,
+  "update_offset": 358421298,
   "version": 1,
-  "watching": true
+  "walk_minutes": 20,
+  "watching": false
 }
