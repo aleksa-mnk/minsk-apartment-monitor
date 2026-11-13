@@ -1,0 +1,10 @@
+{
+  "initialized": false,
+  "max_price_usd": 0,
+  "owner_only": false,
+  "rooms": 0,
+  "seen": [],
+  "update_offset": 0,
+  "version": 1,
+  "watching": true
+}
