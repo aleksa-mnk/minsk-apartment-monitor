@@ -1,9 +1,9 @@
 {
   "initialized": true,
-  "last_fetched": 299,
+  "last_fetched": 599,
   "last_matches": 2,
-  "last_scan_at": "2026-11-19T22:09:46+00:00",
-  "last_sent": 0,
+  "last_scan_at": "2026-11-20T03:11:26+00:00",
+  "last_sent": 1,
   "manual_offset": 0,
   "max_price_usd": 550,
   "owner_only": true,
@@ -13,6 +13,7 @@
     "onliner:801516",
     "onliner:885819",
     "onliner:887735",
+    "onliner:938538",
     "realt:1592342",
     "realt:4246751",
     "realt:4257261"
